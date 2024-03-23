@@ -38,6 +38,7 @@ namespace ORB_SLAM3
         mMaxIterations = iterations;
     }
 
+    //三角测量求解位姿
     bool TwoViewReconstruction::Reconstruct(const std::vector<cv::KeyPoint>& vKeys1, const std::vector<cv::KeyPoint>& vKeys2, const vector<int> &vMatches12,
                                              Sophus::SE3f &T21, vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated)
     {
@@ -62,7 +63,8 @@ namespace ORB_SLAM3
             else
                 mvbMatched1[i]=false;
         }
-
+        
+        // 畸变矫正后配准的点的数量
         const int N = mvMatches12.size();
 
         // Indices for minimum set selection
@@ -75,9 +77,10 @@ namespace ORB_SLAM3
             vAllIndices.push_back(i);
         }
 
-        // Generate sets of 8 points for each RANSAC iteration
+        // Generate sets of 8 points for each RANSAC iteration // 二维向量，每行八个元素
         mvSets = vector< vector<size_t> >(mMaxIterations,vector<size_t>(8,0));
 
+        // 随机选八对匹配特征点
         DUtils::Random::SeedRandOnce(0);
 
         for(int it=0; it<mMaxIterations; it++)
@@ -86,14 +89,14 @@ namespace ORB_SLAM3
 
             // Select a minimum set
             for(size_t j=0; j<8; j++)
-            {
-                int randi = DUtils::Random::RandomInt(0,vAvailableIndices.size()-1);
+            {   
+                int randi = DUtils::Random::RandomInt(0,vAvailableIndices.size()-1); // 生成随机整数（0-匹配特征点的数量之间）
                 int idx = vAvailableIndices[randi];
 
                 mvSets[it][j] = idx;
 
-                vAvailableIndices[randi] = vAvailableIndices.back();
-                vAvailableIndices.pop_back();
+                vAvailableIndices[randi] = vAvailableIndices.back(); //获取容器最后一个元素的值
+                vAvailableIndices.pop_back(); //删除最后一个元素
             }
         }
 
@@ -102,8 +105,9 @@ namespace ORB_SLAM3
         float SH, SF;
         Eigen::Matrix3f H, F;
 
-        thread threadH(&TwoViewReconstruction::FindHomography,this,ref(vbMatchesInliersH), ref(SH), ref(H));
-        thread threadF(&TwoViewReconstruction::FindFundamental,this,ref(vbMatchesInliersF), ref(SF), ref(F));
+        // 计算单应矩阵和基础矩阵
+        thread threadH(&TwoViewReconstruction::FindHomography,this,ref(vbMatchesInliersH), ref(SH), ref(H));  //SH得分
+        thread threadF(&TwoViewReconstruction::FindFundamental,this,ref(vbMatchesInliersF), ref(SF), ref(F)); //SF得分
 
         // Wait until both threads have finished
         threadH.join();
@@ -119,15 +123,18 @@ namespace ORB_SLAM3
         if(RH>0.50) // if(RH>0.40)
         {
             //cout << "Initialization from Homography" << endl;
+            // 单应矩阵求解
             return ReconstructH(vbMatchesInliersH,H, mK,T21,vP3D,vbTriangulated,minParallax,50);
         }
         else //if(pF_HF>0.6)
         {
             //cout << "Initialization from Fundamental" << endl;
+            // 基础矩阵的求解
             return ReconstructF(vbMatchesInliersF,F,mK,T21,vP3D,vbTriangulated,minParallax,50);
         }
     }
 
+    // 计算单应矩阵
     void TwoViewReconstruction::FindHomography(vector<bool> &vbMatchesInliers, float &score, Eigen::Matrix3f &H21)
     {
         // Number of putative matches
@@ -178,7 +185,7 @@ namespace ORB_SLAM3
         }
     }
 
-
+    // 计算基础矩阵
     void TwoViewReconstruction::FindFundamental(vector<bool> &vbMatchesInliers, float &score, Eigen::Matrix3f &F21)
     {
         // Number of putative matches
@@ -187,7 +194,7 @@ namespace ORB_SLAM3
         // Normalize coordinates
         vector<cv::Point2f> vPn1, vPn2;
         Eigen::Matrix3f T1, T2;
-        Normalize(mvKeys1,vPn1, T1);
+        Normalize(mvKeys1,vPn1, T1);  //标准化 T1归一化后的特征点
         Normalize(mvKeys2,vPn2, T2);
         Eigen::Matrix3f T2t = T2.transpose();
 
@@ -229,6 +236,7 @@ namespace ORB_SLAM3
         }
     }
 
+    // DLT 方法求解H矩阵
     Eigen::Matrix3f TwoViewReconstruction::ComputeH21(const vector<cv::Point2f> &vP1, const vector<cv::Point2f> &vP2)
     {
         const int N = vP1.size();
@@ -271,13 +279,14 @@ namespace ORB_SLAM3
         return H;
     }
 
+    // DLT 方法求解F矩阵（直接线性变换）
     Eigen::Matrix3f TwoViewReconstruction::ComputeF21(const vector<cv::Point2f> &vP1,const vector<cv::Point2f> &vP2)
     {
         const int N = vP1.size();
 
         Eigen::MatrixXf A(N, 9);
 
-        for(int i=0; i<N; i++)
+        for(int i=0; i<N; i++) //Ai*h=0
         {
             const float u1 = vP1[i].x;
             const float v1 = vP1[i].y;
@@ -295,18 +304,21 @@ namespace ORB_SLAM3
             A(i,8) = 1;
         }
 
-        Eigen::JacobiSVD<Eigen::MatrixXf> svd(A, Eigen::ComputeFullU | Eigen::ComputeFullV);
+        //方程的最小二乘解有一个既定的结论，即对A进行SVD分解，A的最小的奇异值对应的右奇异向量即是h的解。对h做reshape得到H
 
-        Eigen::Matrix<float,3,3,Eigen::RowMajor> Fpre(svd.matrixV().col(8).data());
+        Eigen::JacobiSVD<Eigen::MatrixXf> svd(A, Eigen::ComputeFullU | Eigen::ComputeFullV); //SVD分解
+
+        Eigen::Matrix<float,3,3,Eigen::RowMajor> Fpre(svd.matrixV().col(8).data()); //解为最后一列
 
         Eigen::JacobiSVD<Eigen::Matrix3f> svd2(Fpre, Eigen::ComputeFullU | Eigen::ComputeFullV);
 
-        Eigen::Vector3f w = svd2.singularValues();
-        w(2) = 0;
+        Eigen::Vector3f w = svd2.singularValues();  //奇异值
+        w(2) = 0; 
 
         return svd2.matrixU() * Eigen::DiagonalMatrix<float,3>(w) * svd2.matrixV().transpose();
     }
 
+    // 对H矩阵打分，卡方检验
     float TwoViewReconstruction::CheckHomography(const Eigen::Matrix3f &H21, const Eigen::Matrix3f &H12, vector<bool> &vbMatchesInliers, float sigma)
     {
         const int N = mvMatches12.size();
@@ -392,6 +404,7 @@ namespace ORB_SLAM3
         return score;
     }
 
+    // 对F矩阵打分，卡方检验
     float TwoViewReconstruction::CheckFundamental(const Eigen::Matrix3f &F21, vector<bool> &vbMatchesInliers, float sigma)
     {
         const int N = mvMatches12.size();
@@ -472,6 +485,7 @@ namespace ORB_SLAM3
         return score;
     }
 
+    // 基础矩阵求解
     bool TwoViewReconstruction::ReconstructF(vector<bool> &vbMatchesInliers, Eigen::Matrix3f &F21, Eigen::Matrix3f &K,
                                              Sophus::SE3f &T21, vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated, float minParallax, int minTriangulated)
     {
@@ -486,6 +500,7 @@ namespace ORB_SLAM3
         Eigen::Matrix3f R1, R2;
         Eigen::Vector3f t;
 
+        // 恢复四个解
         // Recover the 4 motion hypotheses
         DecomposeE(E21,R1,R2,t);
 
@@ -568,6 +583,7 @@ namespace ORB_SLAM3
         return false;
     }
 
+    // 单应矩阵求解
     bool TwoViewReconstruction::ReconstructH(vector<bool> &vbMatchesInliers, Eigen::Matrix3f &H21, Eigen::Matrix3f &K,
                                              Sophus::SE3f &T21, vector<cv::Point3f> &vP3D, vector<bool> &vbTriangulated, float minParallax, int minTriangulated)
     {
@@ -733,7 +749,7 @@ namespace ORB_SLAM3
         return false;
     }
 
-
+    // 特征点坐标归一化
     void TwoViewReconstruction::Normalize(const vector<cv::KeyPoint> &vKeys, vector<cv::Point2f> &vNormalizedPoints, Eigen::Matrix3f &T)
     {
         float meanX = 0;
@@ -783,6 +799,7 @@ namespace ORB_SLAM3
         T(2,2) = 1.f;
     }
 
+    // 检测解是否有深度
     int TwoViewReconstruction::CheckRT(const Eigen::Matrix3f &R, const Eigen::Vector3f &t, const vector<cv::KeyPoint> &vKeys1, const vector<cv::KeyPoint> &vKeys2,
                                        const vector<Match> &vMatches12, vector<bool> &vbMatchesInliers,
                                        const Eigen::Matrix3f &K, vector<cv::Point3f> &vP3D, float th2, vector<bool> &vbGood, float &parallax)
