@@ -904,12 +904,14 @@ namespace ORB_SLAM3
         return nmatches;
     }
 
+    // 对极约束约束匹配范围，对满足约束的进行特征匹配
     int ORBmatcher::SearchForTriangulation(KeyFrame *pKF1, KeyFrame *pKF2,
-                                           vector<pair<size_t, size_t> > &vMatchedPairs, const bool bOnlyStereo, const bool bCoarse)
+                                           vector<pair<size_t, size_t> > &vMatchedPairs, const bool bOnlyStereo, const bool bCoarse) //bCoarse成功匹配数量
     {
         const DBoW2::FeatureVector &vFeatVec1 = pKF1->mFeatVec;
         const DBoW2::FeatureVector &vFeatVec2 = pKF2->mFeatVec;
 
+        // 坐标投影到像素坐标
         //Compute epipole in second image
         Sophus::SE3f T1w = pKF1->GetPose();
         Sophus::SE3f T2w = pKF2->GetPose();
@@ -955,11 +957,13 @@ namespace ORB_SLAM3
 
         const float factor = 1.0f/HISTO_LENGTH;
 
+        // Step 2 利用BoW加速匹配：只对属于同一节点(特定层)的ORB特征进行匹配
         DBoW2::FeatureVector::const_iterator f1it = vFeatVec1.begin();
         DBoW2::FeatureVector::const_iterator f2it = vFeatVec2.begin();
         DBoW2::FeatureVector::const_iterator f1end = vFeatVec1.end();
         DBoW2::FeatureVector::const_iterator f2end = vFeatVec2.end();
 
+        // Step 2.1：遍历pKF1和pKF2中的node节点
         while(f1it!=f1end && f2it!=f2end)
         {
             if(f1it->first == f2it->first)
@@ -1069,6 +1073,7 @@ namespace ORB_SLAM3
 
                         }
 
+                        // 是否满足对极约束
                         if(bCoarse || pCamera1->epipolarConstrain(pCamera2,kp1,kp2,R12,t12,pKF1->mvLevelSigma2[kp1.octave],pKF2->mvLevelSigma2[kp2.octave])) // MODIFICATION_2
                         {
                             bestIdx2 = idx2;
