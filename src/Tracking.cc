@@ -2968,7 +2968,7 @@ void Tracking::UpdateLastFrame()
     }
 }
 
-// 融合IMU追踪
+// imu初始化使用imu估计位姿，没有初始化恒速模型在参考帧中寻找匹配点，优化每个特征点投影误差即可得到位姿优化 //为什么不使用imu也优化一下呢？
 bool Tracking::TrackWithMotionModel()
 {
     ORBmatcher matcher(0.9,true);
@@ -2977,6 +2977,7 @@ bool Tracking::TrackWithMotionModel()
     // Create "visual odometry" points if in Localization Mode
     UpdateLastFrame();
 
+    // imu初始化
     if (mpAtlas->isImuInitialized() && (mCurrentFrame.mnId>mnLastRelocFrameId+mnFramesToResetIMU))
     {
         // Predict state with IMU if it is initialized and it doesnt need reset
@@ -2985,6 +2986,7 @@ bool Tracking::TrackWithMotionModel()
     }
     else
     {
+        // 估计当前帧的位姿（恒速模式下）
         mCurrentFrame.SetPose(mVelocity * mLastFrame.GetPose());
     }
 
@@ -3001,6 +3003,7 @@ bool Tracking::TrackWithMotionModel()
     else
         th=15;
 
+    // 匹配特征点
     int nmatches = matcher.SearchByProjection(mCurrentFrame,mLastFrame,th,mSensor==System::MONOCULAR || mSensor==System::IMU_MONOCULAR);
 
     // If few matches, uses a wider window search
@@ -3024,6 +3027,7 @@ bool Tracking::TrackWithMotionModel()
     }
 
     // Optimize frame pose with all matches
+    // 优化位姿
     Optimizer::PoseOptimization(&mCurrentFrame);
 
     // Discard outliers

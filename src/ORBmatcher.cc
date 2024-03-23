@@ -1673,7 +1673,8 @@ namespace ORB_SLAM3
         return nFound;
     }
 
-    int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool bMono)
+    // 搜索特征匹配点 //上一帧地图点投影与当前帧进行匹配
+    int ORBmatcher::SearchByProjection(Frame &CurrentFrame, const Frame &LastFrame, const float th, const bool bMono) //th搜索范围
     {
         int nmatches = 0;
 
@@ -1682,16 +1683,17 @@ namespace ORB_SLAM3
         for(int i=0;i<HISTO_LENGTH;i++)
             rotHist[i].reserve(500);
         const float factor = 1.0f/HISTO_LENGTH;
-
+        // 当前帧
         const Sophus::SE3f Tcw = CurrentFrame.GetPose();
         const Eigen::Vector3f twc = Tcw.inverse().translation();
-
+        // 上一帧
         const Sophus::SE3f Tlw = LastFrame.GetPose();
         const Eigen::Vector3f tlc = Tlw * twc;
 
         const bool bForward = tlc(2)>CurrentFrame.mb && !bMono;
         const bool bBackward = -tlc(2)>CurrentFrame.mb && !bMono;
-
+    
+        // step 1 遍历有效局部地图点
         for(int i=0; i<LastFrame.N; i++)
         {
             MapPoint* pMP = LastFrame.mvpMapPoints[i];
@@ -1699,6 +1701,7 @@ namespace ORB_SLAM3
             {
                 if(!LastFrame.mvbOutlier[i])
                 {
+                    // 世界坐标--相机坐标--相机归一化坐标--像素坐标
                     // Project
                     Eigen::Vector3f x3Dw = pMP->GetWorldPos();
                     Eigen::Vector3f x3Dc = Tcw * x3Dw;
@@ -1721,6 +1724,7 @@ namespace ORB_SLAM3
                                                                                      : LastFrame.mvKeysRight[i - LastFrame.Nleft].octave;
 
                     // Search in a window. Size depends on scale
+                    // step2 设定窗口大小
                     float radius = th*CurrentFrame.mvScaleFactors[nLastOctave];
 
                     vector<size_t> vIndices2;
@@ -1740,6 +1744,7 @@ namespace ORB_SLAM3
                     int bestDist = 256;
                     int bestIdx2 = -1;
 
+                    // step3 寻找最佳和次佳匹配点
                     for(vector<size_t>::const_iterator vit=vIndices2.begin(), vend=vIndices2.end(); vit!=vend; vit++)
                     {
                         const size_t i2 = *vit;
