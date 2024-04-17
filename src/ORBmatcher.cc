@@ -1689,10 +1689,10 @@ namespace ORB_SLAM3
             rotHist[i].reserve(500);
         const float factor = 1.0f/HISTO_LENGTH;
         // 当前帧
-        const Sophus::SE3f Tcw = CurrentFrame.GetPose();
+        const Sophus::SE3f Tcw = CurrentFrame.GetPose(); //mTcw
         const Eigen::Vector3f twc = Tcw.inverse().translation();
         // 上一帧
-        const Sophus::SE3f Tlw = LastFrame.GetPose();
+        const Sophus::SE3f Tlw = LastFrame.GetPose(); //Tcw
         const Eigen::Vector3f tlc = Tlw * twc;
 
         const bool bForward = tlc(2)>CurrentFrame.mb && !bMono;
@@ -1718,7 +1718,7 @@ namespace ORB_SLAM3
                     if(invzc<0)
                         continue;
 
-                    Eigen::Vector2f uv = CurrentFrame.mpCamera->project(x3Dc);
+                    Eigen::Vector2f uv = CurrentFrame.mpCamera->project(x3Dc); //当前帧
 
                     if(uv(0)<CurrentFrame.mnMinX || uv(0)>CurrentFrame.mnMaxX)
                         continue;
@@ -1726,7 +1726,7 @@ namespace ORB_SLAM3
                         continue;
 
                     int nLastOctave = (LastFrame.Nleft == -1 || i < LastFrame.Nleft) ? LastFrame.mvKeys[i].octave
-                                                                                     : LastFrame.mvKeysRight[i - LastFrame.Nleft].octave;
+                                                                                     : LastFrame.mvKeysRight[i - LastFrame.Nleft].octave; // Nleft 关键点数量
 
                     // Search in a window. Size depends on scale
                     // step2 设定窗口大小

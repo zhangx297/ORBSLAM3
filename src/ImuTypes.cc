@@ -196,13 +196,10 @@ void Preintegrated::IntegrateNewMeasurement(const Eigen::Vector3f &acceleration,
     // Position is updated firstly, as it depends on previously computed velocity and rotation.
     // Velocity is updated secondly, as it depends on previously computed rotation.
     // Rotation is the last to be updated.
-
-    // 计算噪声的协方差矩阵A、B
     // Matrices to compute covariance
-    // 噪声矩阵的传递矩阵，这部分用于计算i到j-1历史噪声或者协方差
+    //计算协方差传递所需的A、B矩阵，下面的计算详见forster论文附录A.7~A.9
     Eigen::Matrix<float,9,9> A;
     A.setIdentity();
-    // 噪声矩阵的传递矩阵，这部分用于计算j-1新的噪声或协方差，这两个矩阵里面的数都是当前时刻的，计算主要是为了下一时刻使用
     Eigen::Matrix<float,9,6> B;
     B.setZero();
 
@@ -215,7 +212,7 @@ void Preintegrated::IntegrateNewMeasurement(const Eigen::Vector3f &acceleration,
     avgA = (dT*avgA + dR*acc*dt)/(dT+dt);
     avgW = (dT*avgW + accW*dt)/(dT+dt);
 
-    // 根据没有更新的dR来更新dP与dV  eq.(38)
+    //更新P、V的预积分量，forster论文公式(26)
     // Update delta position dP and velocity dV (rely on no-updated delta rotation)
     dP = dP + dV*dt + 0.5f*dR*acc*dt*dt;  
     dV = dV + dR*acc*dt;
@@ -230,7 +227,7 @@ void Preintegrated::IntegrateNewMeasurement(const Eigen::Vector3f &acceleration,
     B.block<3,3>(3,3) = dR*dt;
     B.block<3,3>(6,3) = 0.5f*dR*dt*dt;
 
-    // 更新后的dP, dV更新对bias的jacobian （9）
+    // 更新后的dP, dV更新对bias的jacobian
     // 递推公式的推导与上文中dP, dV的更新类似，都是将整个求和项分为i~j-2与j-1两部分
     // Update position and velocity jacobians wrt bias correction
     JPa = JPa + JVa*dt -0.5f*dR*dt*dt;
@@ -262,22 +259,6 @@ void Preintegrated::IntegrateNewMeasurement(const Eigen::Vector3f &acceleration,
 
     // Total integrated time
     dT += dt;
-    // std::cout << acc[0] << " " << acc[1] << " " << acc[2] << std::endl;
-    // std::cout << accW[0] << " " << accW[1] << " " << accW[2] << std::endl;
-    // std::cout << "--------------------------------------" << std::endl;
-    // std::ofstream file("acc.txt", std::ofstream::app);
-    // std::ofstream file1("accW.txt", std::ofstream::app);
-    // if(file.is_open() && file1.is_open()) {
-    
-    //     file << acc[0] << " " << acc[1] << " " << acc[2] << std::endl;
-    //     file1 << accW[0] << " " << accW[1] << " " << accW[2] << std::endl;
-    //     file.close();
-    //     file1.close();
-    // } else {
-    //     std::cout << "文件打开失败." << std::endl;
-    // }
-
-    // acc accW  Eigen::Vector3f三维浮点向量
 }
 
 //融合两个预积分，发生在删除关键帧的时候，3帧变2帧，需要把两段预积分融合
