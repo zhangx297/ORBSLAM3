@@ -30,12 +30,15 @@
 #include "GeometricTools.h"
 
 #include <iostream>
-
+#include<fstream>
+#include<vector>
+#include<opencv2/opencv.hpp>
 #include <mutex>
 #include <chrono>
 
 
 using namespace std;
+using namespace cv;
 
 namespace ORB_SLAM3
 {
@@ -2395,7 +2398,114 @@ void Tracking::Track()
 #endif
 }
 
+// void feature_matching(const Mat &img1, const Mat &img2, std::vector<KeyPoint> &keypoints_1, std::vector<KeyPoint> &keypoints_2, std::vector<DMatch> &matches){
+//     Mat descriptors_1, descriptors_2;
+//     Ptr<FeatureDetector> detector = ORB::create();
+//     Ptr<DescriptorExtractor> descriptor = ORB::create();
+//     Ptr<DescriptorMatcher> matcher = DescriptorMatcher::create("BruteForce-Hamming");
 
+//     detector->detect(img1, keypoints_1);
+//     detector->detect(img2, keypoints_2);
+
+//     descriptor->compute(img1, keypoints_1, descriptors_1);
+//     descriptor->compute(img2, keypoints_2, descriptors_2);
+
+//     vector<DMatch> match;
+//     matcher->match(descriptors_1, descriptors_2, match);
+
+//     double min_dist = 10000, max_dist = 0;
+//     for (int i = 0; i < descriptors_1.rows; i++){
+//     	double dist = match[i].distance;
+// 	if (dist < min_dist) min_dist = dist;
+// 	if (dist > min_dist) max_dist = dist;
+//     }
+
+//     // cout << "min_dist: "<< min_dist << endl;
+
+//     for (int i = 0; i < descriptors_1.rows; i++){
+//     	if (match[i].distance <= max(2 * min_dist, 200.0))
+// 	    matches.push_back(match[i]);
+//     }
+// }
+
+bool pose_estimation_2d2d(vector<KeyPoint> &keypoints_1, vector<KeyPoint> &keypoints_2,
+                const vector<DMatch> &matches, Mat &R, Mat &t, Eigen::Matrix3f &K){
+    vector<Point2f> points1, points2;
+    cout << "matches.size = " << matches.size() << endl;
+    for (int i=0; i < (int) matches.size(); i++){
+    	points1.push_back(keypoints_1[matches[i].queryIdx].pt);
+	    points2.push_back(keypoints_2[matches[i].trainIdx].pt);
+        // cout << "keypoint" << int(keypoints_1[matches[i].queryIdx].pt.x) << "," << int(keypoints_2[matches[i].trainIdx].pt.x) << endl;
+    }
+
+    // cout << K << endl;
+    // cout << points1 << "right" << points2 << endl;
+    for (int i=0; i<points1.size(); i++){
+        points1[i].x = int(points1[i].x);
+        points1[i].y = int(points1[i].y);  
+        points2[i].x = int(points2[i].x);
+        points2[i].y = int(points2[i].y); 
+    }
+
+    Point2d principal_point(K(0,2), K(1,2));
+    float focal_length = K(1,1);
+    try
+    {
+        Mat essential_matrix;
+        essential_matrix = findEssentialMat(points1, points2, focal_length, principal_point);
+        recoverPose(essential_matrix, points1, points2, R, t, focal_length, principal_point);
+        // return true;
+        return false;
+    }
+    catch (const cv::Exception& e)
+    {
+        std::cerr << "无法求得本质矩阵 " << e.what() << std::endl;
+        return false;
+    }
+}
+
+Point2f pixel2cam(const Point2d &p, const Mat &K){
+return Point2f((p.x - K.at<double>(0, 2)) / K.at<double>(0, 0),
+        (p.y - K.at<double>(1, 2)) / K.at<double>(1, 1));
+}
+
+void triangulation(vector<KeyPoint> &keypoints_1, vector<KeyPoint> &keypoints_2, const vector<DMatch> &matches, const Mat &R, const Mat &t, vector<Point3d> &points, Eigen::Matrix3f &K_){
+    Mat T1 = (Mat_<float>(3, 4) << 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0);
+    // R+t
+    Mat T2 = (Mat_<float>(3, 4) << R.at<double>(0, 0), R.at<double>(0, 1), R.at<double>(0, 2), t.at<double>(0, 0),R.at<double>(1, 0), R.at<double>(1, 1), R.at<double>(1, 2), t.at<double>(1, 0),R.at<double>(2, 0), R.at<double>(2, 1), R.at<double>(2, 2), t.at<double>(2, 0));
+    vector<Point2f> pts_1, pts_2;
+    // 归一化后的相机坐标
+    Mat K = (Mat_<double>(3, 3) << K_(0,0), K_(0,1), K_(0,2), K_(1,0), K_(1,1), K_(1,2), K_(2,0), K_(2,1), K_(2,2));
+    try{
+        for (DMatch m:matches){
+            // keypoints_1[m.queryIdx].pt = Point2f(int(keypoints_1[m.queryIdx].pt.x),int(keypoints_1[m.queryIdx].pt.y));
+            // keypoints_2[m.trainIdx].pt = Point2f(int(keypoints_2[m.trainIdx].pt.y),int(keypoints_2[m.trainIdx].pt.y));
+            // cout << "keypoint" << keypoints_2[m.trainIdx].pt << endl;
+            // cout << "pixel2cam" << pixel2cam(keypoints_1[m.queryIdx].pt, K) << endl;
+            pts_1.push_back(pixel2cam(keypoints_1[m.queryIdx].pt, K));
+            pts_2.push_back(pixel2cam(keypoints_2[m.trainIdx].pt, K));
+        }
+
+        Mat pts_4d;
+        cv::triangulatePoints(T1, T2, pts_1, pts_2, pts_4d);
+        
+        for (int i = 0; i < pts_4d.cols; i++){
+        Mat x = pts_4d.col(i);
+        x /= x.at<float>(3, 0); //转换为非其次坐标
+        Point3d p(
+            x.at<float>(0, 0),
+            x.at<float>(1, 0),
+            x.at<float>(2, 0));
+        
+        points.push_back(p);
+        }
+    }
+    catch (const cv::Exception& e)
+    {
+        std::cerr << "三角测量失败 " << e.what() << std::endl;
+    }
+}
+// 双目初始化
 void Tracking::StereoInitialization()
 {
     if(mCurrentFrame.N>500)
@@ -2441,13 +2551,37 @@ void Tracking::StereoInitialization()
 
         // Create MapPoints and asscoiate to KeyFrame
         if(!mpCamera2){
-            for(int i=0; i<mCurrentFrame.N;i++)
-            {
-                float z = mCurrentFrame.mvDepth[i];
-                if(z>0)
-                {
-                    Eigen::Vector3f x3D;
-                    mCurrentFrame.UnprojectStereo(i, x3D);
+            
+            vector<KeyPoint> keypoints_1, keypoints_2;
+            vector<DMatch> matches;
+            // Mat img1 = imread("/home/zxt/ORBSLAM3-master/test/img_1.jpg", IMREAD_COLOR);
+            // cv::imshow("img 1", mImGray);
+            // cv::imshow("img 2", mImRight);
+
+            // feature_matching(mImGray, mImRight, keypoints_1, keypoints_2, matches);
+
+            Mat R, t;
+            // cout << matches.size() << endl;
+            // for (int i = 0; i < matches.size(); i++)
+            // {
+            //     std::cout << i << "-keypoints:" << matches[i].trainIdx << std::endl;
+            // }
+
+            // std::vector<cv::KeyPoint> mvKeys, mvKeysRight;
+            // if (pose_estimation_2d2d(keypoints_1, keypoints_2, matches, R, t, mCurrentFrame.mK_)){
+            cout << "keypoint_size: " << mCurrentFrame.mvKeys.size() << endl;
+            if (pose_estimation_2d2d(mCurrentFrame.mvKeys, mCurrentFrame.mvKeysRight, mCurrentFrame.matches, R, t, mCurrentFrame.mK_)){
+                vector<Point3d> points;
+                // cout << R << "," << t << endl;
+                triangulation(mCurrentFrame.mvKeys, mCurrentFrame.mvKeysRight, mCurrentFrame.matches, R, t, points, mCurrentFrame.mK_);
+                Eigen::Vector3f x3D;
+                // cout << points.size() << endl;
+                for (int i=0; i < points.size(); i++){
+                    x3D << points[i].x, points[i].y, points[i].z;
+                    // cout << i << "--" << x3D << endl;
+                    mCurrentFrame.ctow(x3D);
+                    cout << i << "--" << x3D << endl;
+
                     MapPoint* pNewMP = new MapPoint(x3D, pKFini, mpAtlas->GetCurrentMap());
                     pNewMP->AddObservation(pKFini,i);
                     pKFini->AddMapPoint(pNewMP,i);
@@ -2456,13 +2590,36 @@ void Tracking::StereoInitialization()
                     mpAtlas->AddMapPoint(pNewMP);
 
                     mCurrentFrame.mvpMapPoints[i]=pNewMP;
-                }
+                }  
             }
+            else{
+                // cout << mCurrentFrame.N << endl;
+                for(int i=0; i<mCurrentFrame.N;i++)
+                {
+                    float z = mCurrentFrame.mvDepth[i];
+                    if(z>0)
+                    {
+                        Eigen::Vector3f x3D;
+                        // cout << "222:" << x3D << endl;
+                        mCurrentFrame.UnprojectStereo(i, x3D);
+                        cout << i << "--" << x3D << endl;
+                        MapPoint* pNewMP = new MapPoint(x3D, pKFini, mpAtlas->GetCurrentMap());
+                        pNewMP->AddObservation(pKFini,i);
+                        pKFini->AddMapPoint(pNewMP,i);
+                        pNewMP->ComputeDistinctiveDescriptors();
+                        pNewMP->UpdateNormalAndDepth();
+                        mpAtlas->AddMapPoint(pNewMP);
+
+                        mCurrentFrame.mvpMapPoints[i]=pNewMP;
+                    }
+                }
+            } 
         } else{
             for(int i = 0; i < mCurrentFrame.Nleft; i++){
                 int rightIndex = mCurrentFrame.mvLeftToRightMatch[i];
                 if(rightIndex != -1){
                     Eigen::Vector3f x3D = mCurrentFrame.mvStereo3Dpoints[i];
+                    cout << "222" << endl;
 
                     MapPoint* pNewMP = new MapPoint(x3D, pKFini, mpAtlas->GetCurrentMap());
 
@@ -2599,6 +2756,7 @@ void Tracking::MonocularInitialization()
             // mvIniP3D是cv::Point3f类型的一个容器，是个存放3D点的临时变量，
             // CreateInitialMapMonocular将3D点包装成MapPoint类型存入KeyFrame和Map中
             CreateInitialMapMonocular();
+            // cout << "11111" << endl;
         }
     }
 }
@@ -2982,7 +3140,9 @@ bool Tracking::TrackWithMotionModel()
     {
         // Predict state with IMU if it is initialized and it doesnt need reset
         PredictStateIMU();
+        // cout << "2222222222222" << endl;
         return true;
+
     }
     else
     {
@@ -2991,6 +3151,7 @@ bool Tracking::TrackWithMotionModel()
     }
 
 
+    // cout << "11111111111111" << endl;
 
 
     fill(mCurrentFrame.mvpMapPoints.begin(),mCurrentFrame.mvpMapPoints.end(),static_cast<MapPoint*>(NULL));
